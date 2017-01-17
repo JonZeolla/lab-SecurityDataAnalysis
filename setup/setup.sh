@@ -20,6 +20,7 @@
 
 ## Global Instantiations
 # Static Variables
+declare -r scriptbegin=$(date +%s)
 declare -r usrCurrent="${SUDO_USER:-${USER}}"
 declare -r unusedUID="$(awk -F: '{uid[$3]=1}END{for(x=1000;x<=1100;x++) {if(uid[x] != ""){}else{print x; exit;}}}' /etc/passwd)"
 declare -r metronRepo="https://github.com/apache/incubator-metron"
@@ -121,8 +122,9 @@ function _cleanup() {
 function _quit() {
         exitCode="${1:-0}"
         _cleanup
+        scriptend=$(date +%s)
         if [[ "${verbose}" == "1" ]]; then
-            _feedback VERBOSE "$(hostname):$(readlink -f ${0}) $* completed at [`date`] as PID $$ with an exit code of ${exitCode}"
+            _feedback VERBOSE "$(hostname):$(readlink -f ${0}) $* completed at [`date`] after $(python -c "print '%um:%02us' % ((${scriptend} - ${scriptbegin})/60, (${scriptend} - ${scriptbegin})%60)") with an exit code of ${exitCode}"
         fi
         exit "${exitCode}"
 }
@@ -529,7 +531,7 @@ done
 
 # Setup python
 # TODO: Consider using python -c 'import sys;print(sys.version_info[:3])' instead of python --version?
-if command -v python > /dev/null 2>&1 && [[ "Python ${component[python]}" == "$(python --version)" ]]; then
+if command -v python > /dev/null 2>&1 && [[ "Python ${component[python]}" == "$(python --version 2>&1)" ]]; then
     _feedback INFO "Python ${component[python]} already appears to be active, skipping..."
 else
     if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing python into $(_getDir "python")"; fi
@@ -603,32 +605,32 @@ else
     vagrant plugin install vagrant-hostmanager || _feedback ERROR "Unable to install the vagrant-hostmanager vagrant plugin"
 fi 
 
-    # Setup Metron
-    if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing metron into $(_getDir "metron")"; fi
-    # TODO: Allow a way to pull down and setup a specific, older version by checking out the ref
-    # TODO: Fetching specific refs may cause an issue with the PR merge feature
-    cd "$(_getDir "metron")"
-    _downloadit "${metronRepo}" "git"
-    if [[ "${mergebranch}" == "1" ]]; then
-        if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Merging the branches ${branches[@]} into $(_getDir "metron")"; fi
-        for branch in "${branches[@]}"; do
-            git merge "${branch}" || _feedback ABORT "Unable to merge the ${branch} branch"
-        done
-    elif [[ "${mergepr}" == "1" ]]; then
-        if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Merging the pr ${prSpecified} into $(_getDir "metron")"; fi
-        isgit="$(git rev-parse --is-inside-work-tree || echo false)"
-        curBranch="$(git branch | grep \* | awk '{print $2}')"
-        theOrigin="$(git remote -v | grep -m 1 origin | awk '{print $2}')"
-        if [[ "${isgit}" == "true" && "${curBranch}" == "${component[metron]}" && "${theOrigin}" == "${metronRepo}" ]]; then
-            git fetch origin "pull/${prSpecified}/head:pr-${prSpecified}" || _feedback ERROR "Issue fetching the ${prSpecified} PR"
-            git merge "pr-${prSpecified}" || _feedback ERROR "Issue merging the ${prSpecified} PR"
-        else
-            _feedback "ABORT" "Something went wrong when trying to merge pr ${prSpecified} into $(_getDir "metron")"
-        fi
+# Setup Metron
+if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing metron into $(_getDir "metron")"; fi
+# TODO: Allow a way to pull down and setup a specific, older version by checking out the ref
+# TODO: Fetching specific refs may cause an issue with the PR merge feature
+cd "$(_getDir "metron")"
+_downloadit "${metronRepo}" "git"
+if [[ "${mergebranch}" == "1" ]]; then
+    if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Merging the branches ${branches[@]} into $(_getDir "metron")"; fi
+    for branch in "${branches[@]}"; do
+        git merge "${branch}" || _feedback ABORT "Unable to merge the ${branch} branch"
+    done
+elif [[ "${mergepr}" == "1" ]]; then
+    if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Merging the pr ${prSpecified} into $(_getDir "metron")"; fi
+    isgit="$(git rev-parse --is-inside-work-tree || echo false)"
+    curBranch="$(git branch | grep \* | awk '{print $2}')"
+    theOrigin="$(git remote -v | grep -m 1 origin | awk '{print $2}')"
+    if [[ "${isgit}" == "true" && "${curBranch}" == "${component[metron]}" && "${theOrigin}" == "${metronRepo}" ]]; then
+        git fetch origin "pull/${prSpecified}/head:pr-${prSpecified}" || _feedback ERROR "Issue fetching the ${prSpecified} PR"
+        git merge "pr-${prSpecified}" || _feedback ERROR "Issue merging the ${prSpecified} PR"
+    else
+        _feedback "ABORT" "Something went wrong when trying to merge pr ${prSpecified} into $(_getDir "metron")"
     fi
-    /usr/local/bin/mvn clean package -DskipTests || _feedback ABORT "Issue building Metron"
+fi
+/usr/local/bin/mvn clean package -DskipTests || _feedback ABORT "Issue building Metron"
     
-if [[ "Python ${component[python]}" == $(python --version) && -x $(which easy_install-${component[python]:0:3}) && "ansible ${component[ansible]}" == $(ansible --version | head -1) && "${component[virtualbox]%%_*}" == "$(vboxmanage --version | cut -f1 -d'r')" && "Vagrant ${component[vagrant]}" == $(vagrant --version) ]]; then
+if [[ "Python ${component[python]}" == $(python --version 2>&1) && -x $(which easy_install-${component[python]:0:3}) && "ansible ${component[ansible]}" == $(ansible --version | head -1) && "${component[virtualbox]%%_*}" == "$(vboxmanage --version | cut -f1 -d'r')" && "Vagrant ${component[vagrant]}" == $(vagrant --version) ]]; then
     # Start Metron, if appropriate
     if [[ "${startitup}" == "1" ]]; then
         # Required for older versions of Metron
