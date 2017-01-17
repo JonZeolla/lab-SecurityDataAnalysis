@@ -630,7 +630,7 @@ fi
     fi
     /usr/local/bin/mvn clean package -DskipTests || _feedback ABORT "Issue building Metron"
     
-if [[ "Python ${component[python]}" == $(python --version) && -x $(which easy_install-${component[python]:0:3}) && "ansible ${component[ansible]}" == $(ansible --version | head -1) && "${component[virtualbox]%%_*}" == "$(vboxmanage --version | cut -f1 -d'r')" && "Vagrant ${component[vagrant]}" == $(vagrant --version) ]]; then
+if [[ "Python ${component[python]}" == $(python --version 2>&1) && -x $(which easy_install-${component[python]:0:3}) && "ansible ${component[ansible]}" == $(ansible --version | head -1) && "${component[virtualbox]%%_*}" == "$(vboxmanage --version | cut -f1 -d'r')" && "Vagrant ${component[vagrant]}" == $(vagrant --version) ]]; then
     # Start Metron, if appropriate
     if [[ "${startitup}" == "1" ]]; then
         # Required for older versions of Metron
