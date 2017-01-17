@@ -531,7 +531,7 @@ done
 
 # Setup python
 # TODO: Consider using python -c 'import sys;print(sys.version_info[:3])' instead of python --version?
-if command -v python > /dev/null 2>&1 && [[ "Python ${component[python]}" == "$(python --version)" ]]; then
+if command -v python > /dev/null 2>&1 && [[ "Python ${component[python]}" == "$(python --version 2>&1)" ]]; then
     _feedback INFO "Python ${component[python]} already appears to be active, skipping..."
 else
     if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing python into $(_getDir "python")"; fi
