@@ -20,6 +20,7 @@
 
 ## Global Instantiations
 # Static Variables
+declare -r scriptbegin=$(date +%s)
 declare -r usrCurrent="${SUDO_USER:-${USER}}"
 declare -r unusedUID="$(awk -F: '{uid[$3]=1}END{for(x=1000;x<=1100;x++) {if(uid[x] != ""){}else{print x; exit;}}}' /etc/passwd)"
 declare -r metronRepo="https://github.com/apache/incubator-metron"
@@ -121,8 +122,9 @@ function _cleanup() {
 function _quit() {
         exitCode="${1:-0}"
         _cleanup
+        scriptend=$(date +%s)
         if [[ "${verbose}" == "1" ]]; then
-            _feedback VERBOSE "$(hostname):$(readlink -f ${0}) $* completed at [`date`] as PID $$ with an exit code of ${exitCode}"
+            _feedback VERBOSE "$(hostname):$(readlink -f ${0}) $* completed at [`date`] after $(python -c "print '%um:%02us' % ((${scriptend} - ${scriptbegin})/60, (${scriptend} - ${scriptbegin})%60)") with an exit code of ${exitCode}"
         fi
         exit "${exitCode}"
 }
