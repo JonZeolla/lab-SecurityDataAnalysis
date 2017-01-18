@@ -605,30 +605,30 @@ else
     vagrant plugin install vagrant-hostmanager || _feedback ERROR "Unable to install the vagrant-hostmanager vagrant plugin"
 fi 
 
-    # Setup Metron
-    if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing metron into $(_getDir "metron")"; fi
-    # TODO: Allow a way to pull down and setup a specific, older version by checking out the ref
-    # TODO: Fetching specific refs may cause an issue with the PR merge feature
-    cd "$(_getDir "metron")"
-    _downloadit "${metronRepo}" "git"
-    if [[ "${mergebranch}" == "1" ]]; then
-        if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Merging the branches ${branches[@]} into $(_getDir "metron")"; fi
-        for branch in "${branches[@]}"; do
-            git merge "${branch}" || _feedback ABORT "Unable to merge the ${branch} branch"
-        done
-    elif [[ "${mergepr}" == "1" ]]; then
-        if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Merging the pr ${prSpecified} into $(_getDir "metron")"; fi
-        isgit="$(git rev-parse --is-inside-work-tree || echo false)"
-        curBranch="$(git branch | grep \* | awk '{print $2}')"
-        theOrigin="$(git remote -v | grep -m 1 origin | awk '{print $2}')"
-        if [[ "${isgit}" == "true" && "${curBranch}" == "${component[metron]}" && "${theOrigin}" == "${metronRepo}" ]]; then
-            git fetch origin "pull/${prSpecified}/head:pr-${prSpecified}" || _feedback ERROR "Issue fetching the ${prSpecified} PR"
-            git merge "pr-${prSpecified}" || _feedback ERROR "Issue merging the ${prSpecified} PR"
-        else
-            _feedback "ABORT" "Something went wrong when trying to merge pr ${prSpecified} into $(_getDir "metron")"
-        fi
+# Setup Metron
+if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing metron into $(_getDir "metron")"; fi
+# TODO: Allow a way to pull down and setup a specific, older version by checking out the ref
+# TODO: Fetching specific refs may cause an issue with the PR merge feature
+cd "$(_getDir "metron")"
+_downloadit "${metronRepo}" "git"
+if [[ "${mergebranch}" == "1" ]]; then
+    if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Merging the branches ${branches[@]} into $(_getDir "metron")"; fi
+    for branch in "${branches[@]}"; do
+        git merge "${branch}" || _feedback ABORT "Unable to merge the ${branch} branch"
+    done
+elif [[ "${mergepr}" == "1" ]]; then
+    if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Merging the pr ${prSpecified} into $(_getDir "metron")"; fi
+    isgit="$(git rev-parse --is-inside-work-tree || echo false)"
+    curBranch="$(git branch | grep \* | awk '{print $2}')"
+    theOrigin="$(git remote -v | grep -m 1 origin | awk '{print $2}')"
+    if [[ "${isgit}" == "true" && "${curBranch}" == "${component[metron]}" && "${theOrigin}" == "${metronRepo}" ]]; then
+        git fetch origin "pull/${prSpecified}/head:pr-${prSpecified}" || _feedback ERROR "Issue fetching the ${prSpecified} PR"
+        git merge "pr-${prSpecified}" || _feedback ERROR "Issue merging the ${prSpecified} PR"
+    else
+        _feedback "ABORT" "Something went wrong when trying to merge pr ${prSpecified} into $(_getDir "metron")"
     fi
-    /usr/local/bin/mvn clean package -DskipTests || _feedback ABORT "Issue building Metron"
+fi
+/usr/local/bin/mvn clean package -DskipTests || _feedback ABORT "Issue building Metron"
     
 if [[ "Python ${component[python]}" == $(python --version 2>&1) && -x $(which easy_install-${component[python]:0:3}) && "ansible ${component[ansible]}" == $(ansible --version | head -1) && "${component[virtualbox]%%_*}" == "$(vboxmanage --version | cut -f1 -d'r')" && "Vagrant ${component[vagrant]}" == $(vagrant --version) ]]; then
     # Start Metron, if appropriate
