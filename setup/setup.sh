@@ -398,7 +398,7 @@ case "${OSTYPE}" in
         if [[ -r /etc/centos-release ]]; then
             OS[distro]="$(awk -F\  '{print $1}' /etc/centos-release)"
             OS[version]="$(awk -F\  '{print $(NF-1)}' /etc/centos-release)"
-            if [[ "${OS[distro]}" == "CentOS" && "${OS[version]}" == "6.8" ]]; then
+            if [[ "${OS[distro]}" == "CentOS" && ("${OS[version]}" == "6.8" || "${OS[version]}" =~ "7.2") ]]; then
                 OS[supported]="true"
             else
                 OS[supported]="false"
@@ -476,7 +476,7 @@ fi
 if [[ "${usetheforce}" != "1" ]]; then
     if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Asking the user for confirmation"; fi
     while [ -z "${prompt}" ]; do
-        read -p "This script is intended to be run on a fresh CentOS 6.8 installation and may have unintended side effects otherwise.  Do you want to continue (y/N)? " prompt
+        read -p "This script is intended to be run on a fresh CentOS 6.8 or 7.2 installation and may have unintended side effects otherwise.  Do you want to continue (y/N)? " prompt
         case "${prompt}" in
             [yY]|[yY][eE][sS])
                 _feedback INFO "Please note that this script may take a long time (15+ minutes) to complete"
@@ -503,7 +503,7 @@ usrSpecified="${usrSpecified:-$USER}"
 if [[ "${OS[distro]}" == "CentOS" ]]; then
     if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing some CentOS pre-reqs"; fi
     # Be aware that the following commands may give a "repomd.xml does not match metalink for epel." error every once in a while due to epel resynchronization.
-    _managePackages "install" "http://mirror.redsox.cc/pub/epel/6/i386/epel-release-6-8.noarch.rpm"
+    _managePackages "install" "epel-release"
     _managePackages "update"
     # Setup GUI (assuming minimal install)
     _managePackages "groupinstall" "Development tools" "X Window System" "Desktop" "Desktop Platform"
