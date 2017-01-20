@@ -53,6 +53,8 @@ declare -i modifiedvagrant=0
 declare -i testmode=0
 declare -i addedscpifssh=0
 declare -i addedbrackets=0
+declare -i vagrantreq=0
+declare -i dockerreq=0
 # String Variables
 declare -- deployChoice=""
 declare -- action=""
@@ -70,6 +72,7 @@ component[python]="2.7.11"
 component[maven]="3.3.9"
 component[ez_setup]="bootstrap"
 component[metron]="master"
+component[docker]="1.12.0"
 versions[supported]+="0.3.0"
 versions[workaround]+="0.3.0"
 
@@ -365,13 +368,25 @@ fi
 # Check remaining argument
 case "${1}" in
     [fF][uU][lL][lL]|[fF][uU][lL][lL]-[dD][eE][vV]|[fF][uU][lL][lL]-[dD][eE][vV]-[pP][lL][aA][tT][fF][oO][rR][mM])
-        deployChoice="full-dev-platform" ;;
+        deployChoice="full-dev-platform"
+        vagrantreq="1"
+        ;;
     [qQ][uU][iI][cC][kK]|[qQ][uU][iI][cC][kK]-[dD][eE][vV]|[qQ][uU][iI][cC][kK]-[dD][eE][vV]-[pP][lL][aA][tT][fF][oO][rR][mM])
-        deployChoice="quick-dev-platform" ;;
+        deployChoice="quick-dev-platform"
+        vagrantreq="1"
+        ;;
     [cC][oO][dD][eE][lL][aA][bB]|[cC][oO][dD][eE][lL][aA][bB]-[pP][lL][aA][tT][fF][oO][rR][mM])
-        deployChoice="codelab-platform" ;;
+        deployChoice="codelab-platform"
+        vagrantreq="1"
+        ;;
     [fF][aA][sS][tT][cC][aA][pP][aA]|[fF][aA][sS][tT][cC][aA][pP][aA]-[tT][eE][sS][tT]|[fF][aA][sS][tT][cC][aA][pP][aA]-[tT][eE][sS][tT]-[pP][lL][aA][tT][fF][oO][rR][mM])
-        deployChoice="fastcapa-test-platform" ;;
+        deployChoice="fastcapa-test-platform"
+        vagrantreq="1"
+        ;;
+    [dD][oO][cC][kK][eE][rR]|[mM][eE][tT][rR][oO][nN]-[dD][oO][cC][kK][eE][rR])
+        deployChoice="metron-docker"
+        dockerreq="1"
+        ;;
     *)
         if [[ "${startitup}" == "1" ]]; then
             _showHelp "You requested to start metron by default but did not specify a valid deployment choice"
@@ -455,19 +470,21 @@ fi
 if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Checking network connectivity"; fi
 wget -q --spider 'www.github.com' || _feedback ABORT "Unable to contact github.com"
 
-# Check for virtualization extensions
-if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Ensuring that virtualization extensions are available"; fi
-if ! egrep '(vmx|svm)' /proc/cpuinfo > /dev/null 2>&1 ; then
-    _feedback ABORT "Your system does not support virtualization, which is required for this system to run Metron using vagrant and virtualbox"
+# Check for virtualization extensions if it is going to be using vagrant/virtualbox
+if [[ "${vagrantreq}" == "1" ]]; then
+    if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Ensuring that virtualization extensions are available"; fi
+    if ! egrep '(vmx|svm)' /proc/cpuinfo > /dev/null 2>&1 ; then
+        _feedback ABORT "Your system does not support virtualization, which is required for this system to run Metron using vagrant and virtualbox"
+    fi
 fi
 
 # Ask the user for confirmation
 if [[ "${verbose}" == "1" ]]; then
     for k in "${!component[@]}"; do
         if [[ "${component[${k}]}" != "latest" && "${component[${k}]}" != "master" ]]; then
-            _feedback VERBOSE "Planning to use ${k} ${component[${k}]}"
+            _feedback VERBOSE "Planning to use ${k} ${component[${k}]}, as needed"
         else
-            _feedback VERBOSE "Planning to use the latest version of ${k} as of ${startTime}"
+            _feedback VERBOSE "Planning to use the latest version of ${k} as of ${startTime}, as needed"
         fi
     done
 fi
@@ -479,7 +496,7 @@ if [[ "${usetheforce}" != "1" ]]; then
         read -p "This script is intended to be run on a fresh CentOS 6.8 installation and may have unintended side effects otherwise.  Do you want to continue (y/N)? " prompt
         case "${prompt}" in
             [yY]|[yY][eE][sS])
-                _feedback INFO "Please note that this script may take a long time (15+ minutes) to complete"
+                _feedback INFO "Please note that this script may take a long time (15-90+ minutes, depending on hardware) to complete"
                 sleep 1s
                 _feedback INFO "Continuing..." ;;
             ""|[nN]|[nN][oO])
@@ -508,7 +525,7 @@ if [[ "${OS[distro]}" == "CentOS" ]]; then
     # Setup GUI (assuming minimal install)
     _managePackages "groupinstall" "Development tools" "X Window System" "Desktop" "Desktop Platform"
     _managePackages "install" "gdm" "zlib-devel" "bzip2-devel" "openssl-devel" "ncurses-devel" "sqlite-devel" "readline-devel" "tk-devel" "gdbm-devel" "db4-devel" "libpcap-devel" "xz-devel" "dkms"
-    if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Making sure the system will boot into the GUI"; fi
+    if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Making sure the system will boot into the GUI for future UI use"; fi
     sudo sed -i "26s/^id:3/id:5/" /etc/inittab || _feedback ERROR "Unable to modify /etc/inittab"
 fi
 
@@ -519,6 +536,7 @@ if [[ "${usrSpecified}" != "${USER}" ]]; then
     sudo useradd -d "/home/${usrSpecified}" -g "${usrSpecified}" -G wheel -s /bin/bash -u "${unusedUID}" "${usrSpecified}" || _feedback ERROR "Unable to create user ${usrSpecified} with UID ${unusedUID}"
     sudo passwd "${usrSpecified}" || _feedback ERROR "Unable to reset the password for ${usrSpecified}"
     if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Giving ${usrSpecified} full sudo access"; fi
+    # This should only be done if it is required
     sudo sed -i "98s/^# //" /etc/sudoers || _feedback ERROR "Unable to modify /etc/sudoers"
 fi
 
@@ -529,81 +547,99 @@ for k in "${!component[@]}"; do
     sudo chown "${usrSpecified}:" "$(_getDir ${k})" || _feedback ERROR "Unable to chown ${usrSpecified}: $(_getDir ${k})"
 done
 
-# Setup python
-# TODO: Consider using python -c 'import sys;print(sys.version_info[:3])' instead of python --version?
-if command -v python > /dev/null 2>&1 && [[ "Python ${component[python]}" == "$(python --version 2>&1)" ]]; then
-    _feedback INFO "Python ${component[python]} already appears to be active, skipping..."
-else
-    if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing python into $(_getDir "python")"; fi
-    cd "$(_getDir "python")"
-    _downloadit "https://www.python.org/ftp/python/${component[python]}/Python-${component[python]}.tgz"
-    tar -xvf "Python-${component[python]}.tgz" --strip 1 || _feedback ERROR "Unable to untar $(_getDir "python")/Python-${component[python]}.tgz"
-    ./configure --prefix=/usr/local --enable-unicode=ucs4 --enable-shared LDFLAGS="-Wl,-rpath /usr/local/lib" || _feedback ERROR "Unable to configure python"
-    make && sudo make altinstall || _feedback ERROR "Unable to \`sudo make altinstall\` python"
-    sudo ln -fs "/usr/local/bin/python${component[python]:0:3}" /usr/local/bin/python || _feedback ERROR "Unable to link python${component[python]:0:3} to /usr/local/bin/python"
-fi
-
-# Setup ez_setup
-if command -v easy_install-${component[python]:0:3} > /dev/null 2>&1 ; then
-    _feedback INFO "ez_python ${component[ez_setup]} ($(easy_install-${component[python]:0:3} | awk '{print $2}')) already appears to be active, skipping..."
-else
-    if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing ez_setup into $(_getDir "ez_setup")"; fi
-    cd "$(_getDir "ez_setup")"
-    _downloadit "https://bootstrap.pypa.io/ez_setup.py"
-    sudo /usr/local/bin/python ez_setup.py || _feedback ERROR "Unable to setup ez_python.py"
-    sudo "/usr/local/bin/easy_install-${component[python]:0:3}" pip || _feedback ERROR "Unable to setup pip"
-    sudo /usr/local/bin/pip -q install virtualenv paramiko PyYAML Jinja2 httplib2 six setuptools || _feedback ERROR "Unable to install tools with pip"
-fi
-
-
-# Setup ansible
-if command -v ansible > /dev/null 2>&1 && [[ "ansible ${component[ansible]}" == "$(ansible --version | head -1)" ]]; then
-    _feedback INFO "Ansible ${component[ansible]} already appears to be active, skipping..."
-else
-    if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing ansible using pip"; fi
-    sudo /usr/local/bin/pip -q install "ansible==${component[ansible]}" || _feedback ERROR "Unable to install ansible"
-fi
-
-# Setup maven
-if command -v mvn > /dev/null 2>&1 && [[ "Apache Maven ${component[maven]}" == "$(mvn --version | head -1 | awk '{print $1,$2,$3}')" ]]; then
-    _feedback INFO "Maven ${component[maven]} already appears to be active, skipping..."
-else
-    if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing maven into $(_getDir "maven")"; fi
-    cd "$(_getDir "maven")"
-    _managePackages "install" "java-1.8.0-openjdk-devel"
-    _downloadit "http://mirrors.ibiblio.org/apache/maven/maven-${component[maven]:0:1}/${component[maven]}/binaries/apache-maven-${component[maven]}-bin.tar.gz"
-    tar -xvf "apache-maven-${component[maven]}-bin.tar.gz" --strip 1 || _feedback ERROR "Unable to untar $(_getDir "maven")/apache-maven-${component[maven]}-bin.tar.gz"
-    echo "export M2_HOME=$(_getDir "maven")" | sudo tee /etc/profile.d/maven.sh > /dev/null || _feedback ERROR "Unable to overwrite /etc/profile.d/maven.sh"
-    echo "export PATH=${M2_HOME}/bin:${PATH}" | sudo tee -a /etc/profile.d/maven.sh > /dev/null || _feedback ERROR "Unable to append to /etc/profile.d/maven.sh"
-    sudo chmod o+x /etc/profile.d/maven.sh || _feedback ERROR "Unable to chmod o+x /etc/profile.d/maven.sh"
-    /etc/profile.d/maven.sh || _feedback ERROR "Unable to run /etc/profile.d/maven.sh"
-    sudo ln -fs "/usr/local/maven/${component[maven]}/bin/mvn" /usr/local/bin/mvn || _feedback ERROR "Unable to link /usr/local/maven/${component[maven]}/bin/mvn to /usr/local/bin/mvn"
-fi
-
-# Setup virtualbox
-if command -v virtualbox > /dev/null 2>&1 && [[ "${component[virtualbox]%%_*}" == "$(vboxmanage --version | cut -f1 -d'r')" ]]; then
-    _feedback INFO "Virtualbox ${component[virtualbox]%%_*} already appears to be active, skipping..."
-else
-    if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing virtualbox into $(_getDir "virtualbox")"; fi
-    cd "$(_getDir "virtualbox")"
-    _downloadit "http://download.virtualbox.org/virtualbox/${component[virtualbox]%%_*}/VirtualBox-${component[virtualbox]:0:3}-${component[virtualbox]}_el6-1.x86_64.rpm"
-    _managePackages "install" "VirtualBox-${component[virtualbox]:0:3}-${component[virtualbox]}_el6-1.x86_64.rpm"
-    sudo usermod -a -G vboxusers "${usrSpecified}" || _feedback ERROR "Unable to add ${usrSpecified} to the vboxusers group"
-    if [[ "${usrCurrent}" == "${usrSpecified}" && $(getent group vboxusers | grep "${usrSpecified}") && ! $(id -Gn | grep vboxusers) ]]; then
-        _feedback WARN "In order to take advantage of new group memberships you should log out and log in again, but I'll try to account for this later in the script..."
+# Setup vagrant requirements
+if [[ "${vagrantreq}" == "1" ]]; then
+    # Setup python
+    # TODO: Consider using python -c 'import sys;print(sys.version_info[:3])' instead of python --version?
+    if command -v python > /dev/null 2>&1 && [[ "Python ${component[python]}" == "$(python --version 2>&1)" ]]; then
+        _feedback INFO "Python ${component[python]} already appears to be active, skipping..."
+    else
+        if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing python into $(_getDir "python")"; fi
+        cd "$(_getDir "python")"
+        _downloadit "https://www.python.org/ftp/python/${component[python]}/Python-${component[python]}.tgz"
+        tar -xvf "Python-${component[python]}.tgz" --strip 1 || _feedback ERROR "Unable to untar $(_getDir "python")/Python-${component[python]}.tgz"
+        ./configure --prefix=/usr/local --enable-unicode=ucs4 --enable-shared LDFLAGS="-Wl,-rpath /usr/local/lib" || _feedback ERROR "Unable to configure python"
+        make && sudo make altinstall || _feedback ERROR "Unable to \`sudo make altinstall\` python"
+        sudo ln -fs "/usr/local/bin/python${component[python]:0:3}" /usr/local/bin/python || _feedback ERROR "Unable to link python${component[python]:0:3} to /usr/local/bin/python"
     fi
-fi 
-
-# Setup vagrant
-if command -v vagrant > /dev/null 2>&1 && [[ "Vagrant ${component[vagrant]}" == $(vagrant --version) ]]; then
-    _feedback INFO "Vagrant ${component[vagrant]} already appears to be active, skipping..."
+    
+    # Setup ez_setup
+    if command -v easy_install-${component[python]:0:3} > /dev/null 2>&1 ; then
+        _feedback INFO "ez_python ${component[ez_setup]} ($(easy_install-${component[python]:0:3} | awk '{print $2}')) already appears to be active, skipping..."
+    else
+        if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing ez_setup into $(_getDir "ez_setup")"; fi
+        cd "$(_getDir "ez_setup")"
+        _downloadit "https://bootstrap.pypa.io/ez_setup.py"
+        sudo /usr/local/bin/python ez_setup.py || _feedback ERROR "Unable to setup ez_python.py"
+        sudo "/usr/local/bin/easy_install-${component[python]:0:3}" pip || _feedback ERROR "Unable to setup pip"
+        sudo /usr/local/bin/pip -q install virtualenv paramiko PyYAML Jinja2 httplib2 six setuptools || _feedback ERROR "Unable to install tools with pip"
+    fi
+    
+    
+    # Setup ansible
+    if command -v ansible > /dev/null 2>&1 && [[ "ansible ${component[ansible]}" == "$(ansible --version | head -1)" ]]; then
+        _feedback INFO "Ansible ${component[ansible]} already appears to be active, skipping..."
+    else
+        if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing ansible using pip"; fi
+        sudo /usr/local/bin/pip -q install "ansible==${component[ansible]}" || _feedback ERROR "Unable to install ansible"
+    fi
+    
+    # Setup maven
+    if command -v mvn > /dev/null 2>&1 && [[ "Apache Maven ${component[maven]}" == "$(mvn --version | head -1 | awk '{print $1,$2,$3}')" ]]; then
+        _feedback INFO "Maven ${component[maven]} already appears to be active, skipping..."
+    else
+        if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing maven into $(_getDir "maven")"; fi
+        cd "$(_getDir "maven")"
+        _managePackages "install" "java-1.8.0-openjdk-devel"
+        _downloadit "http://mirrors.ibiblio.org/apache/maven/maven-${component[maven]:0:1}/${component[maven]}/binaries/apache-maven-${component[maven]}-bin.tar.gz"
+        tar -xvf "apache-maven-${component[maven]}-bin.tar.gz" --strip 1 || _feedback ERROR "Unable to untar $(_getDir "maven")/apache-maven-${component[maven]}-bin.tar.gz"
+        echo "export M2_HOME=$(_getDir "maven")" | sudo tee /etc/profile.d/maven.sh > /dev/null || _feedback ERROR "Unable to overwrite /etc/profile.d/maven.sh"
+        echo "export PATH=${M2_HOME}/bin:${PATH}" | sudo tee -a /etc/profile.d/maven.sh > /dev/null || _feedback ERROR "Unable to append to /etc/profile.d/maven.sh"
+        sudo chmod o+x /etc/profile.d/maven.sh || _feedback ERROR "Unable to chmod o+x /etc/profile.d/maven.sh"
+        /etc/profile.d/maven.sh || _feedback ERROR "Unable to run /etc/profile.d/maven.sh"
+        sudo ln -fs "/usr/local/maven/${component[maven]}/bin/mvn" /usr/local/bin/mvn || _feedback ERROR "Unable to link /usr/local/maven/${component[maven]}/bin/mvn to /usr/local/bin/mvn"
+    fi
+    
+    # Setup virtualbox
+    if command -v virtualbox > /dev/null 2>&1 && [[ "${component[virtualbox]%%_*}" == "$(vboxmanage --version | cut -f1 -d'r')" ]]; then
+        _feedback INFO "Virtualbox ${component[virtualbox]%%_*} already appears to be active, skipping..."
+    else
+        if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing virtualbox into $(_getDir "virtualbox")"; fi
+        cd "$(_getDir "virtualbox")"
+        _downloadit "http://download.virtualbox.org/virtualbox/${component[virtualbox]%%_*}/VirtualBox-${component[virtualbox]:0:3}-${component[virtualbox]}_el6-1.x86_64.rpm"
+        _managePackages "install" "VirtualBox-${component[virtualbox]:0:3}-${component[virtualbox]}_el6-1.x86_64.rpm"
+        sudo usermod -a -G vboxusers "${usrSpecified}" || _feedback ERROR "Unable to add ${usrSpecified} to the vboxusers group"
+        if [[ "${usrCurrent}" == "${usrSpecified}" && $(getent group vboxusers | grep "${usrSpecified}") && ! $(id -Gn | grep vboxusers) ]]; then
+            _feedback WARN "In order to take advantage of new group memberships you should log out and log in again, but I'll try to account for this later in the script..."
+        fi
+    fi 
+    
+    # Setup vagrant
+    if command -v vagrant > /dev/null 2>&1 && [[ "Vagrant ${component[vagrant]}" == $(vagrant --version) ]]; then
+        _feedback INFO "Vagrant ${component[vagrant]} already appears to be active, skipping..."
+    else
+        if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing vagrant into $(_getDir "vagrant")"; fi
+        cd "$(_getDir "vagrant")"
+        _downloadit "https://releases.hashicorp.com/vagrant/${component[vagrant]}/vagrant_${component[vagrant]}_x86_64.rpm"
+        _managePackages "install" "vagrant_${component[vagrant]}_x86_64.rpm"
+        vagrant plugin install vagrant-hostmanager || _feedback ERROR "Unable to install the vagrant-hostmanager vagrant plugin"
+    fi 
+elif [[ "${dockerreq}" == "1" ]]; then
+    if [[ "${OS[distro]}" == "CentOS" && "${OS[version]}" == "6.8" ]]; then
+        _feedback ERROR "Docker is not supported on CentOS 6.8, skipping..."
+    elif [[ "${OS[distro]}" == "CentOS" && "${OS[version]}" =~ "7.2" ]]; then
+        if command -v docker > /dev/null 2>&1 ; then
+            # TODO Check docker version, if fail give feedback and check to make sure it's good or bad
+        else
+            # TODO Install docker (sudo yum-config-manager --add-repo https://docs.docker.com/engine/installation/linux/repo_files/centos/docker.repo)
+            _managePackages "install" "docker-engine-${component[docker]}"
+        fi
+    else
+        _feedback ERROR "Unable to detect whether or not your OS supports docker"
+    fi
 else
-    if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing vagrant into $(_getDir "vagrant")"; fi
-    cd "$(_getDir "vagrant")"
-    _downloadit "https://releases.hashicorp.com/vagrant/${component[vagrant]}/vagrant_${component[vagrant]}_x86_64.rpm"
-    _managePackages "install" "vagrant_${component[vagrant]}_x86_64.rpm"
-    vagrant plugin install vagrant-hostmanager || _feedback ERROR "Unable to install the vagrant-hostmanager vagrant plugin"
-fi 
+    _feedback INFO "Neither vagrant nor docker were required, so no requirements for either of those tools were installed"
+fi
 
 # Setup Metron
 if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing metron into $(_getDir "metron")"; fi
@@ -630,7 +666,7 @@ elif [[ "${mergepr}" == "1" ]]; then
 fi
 /usr/local/bin/mvn clean package -DskipTests || _feedback ABORT "Issue building Metron"
     
-if [[ "Python ${component[python]}" == $(python --version 2>&1) && -x $(which easy_install-${component[python]:0:3}) && "ansible ${component[ansible]}" == $(ansible --version | head -1) && "${component[virtualbox]%%_*}" == "$(vboxmanage --version | cut -f1 -d'r')" && "Vagrant ${component[vagrant]}" == $(vagrant --version) ]]; then
+if [[ "${vagrantreq}" == "1" && "Python ${component[python]}" == $(python --version 2>&1) && -x $(which easy_install-${component[python]:0:3}) && "ansible ${component[ansible]}" == $(ansible --version | head -1) && "${component[virtualbox]%%_*}" == "$(vboxmanage --version | cut -f1 -d'r')" && "Vagrant ${component[vagrant]}" == $(vagrant --version) ]]; then
     # Start Metron, if appropriate
     if [[ "${startitup}" == "1" ]]; then
         # Required for older versions of Metron
@@ -704,6 +740,12 @@ if [[ "Python ${component[python]}" == $(python --version 2>&1) && -x $(which ea
             sed -i '/^    ansible\.verbose = \"vvvv\"$/d' "$(_getDir "metron")/metron-deployment/vagrant/${deployChoice}/Vagrantfile"
         fi
     fi
+elif [[ "${dockerreq}" == "1" && "$(docker --version | cut -f1 -d,)" == "Docker version ${component[docker]}" ]]; then # TODO check docker version
+    cd "$(_getDir "metron")/metron-docker"
+    sudo -u "${usrSpecified}" ./scripts/create-docker-machine.sh
+    eval "$(docker-machine env metron-machine)"
+    cd "$(_getDir "metron")/metron-docker/compose"
+    sudo -u "${usrSpecified}" docker-compose up -d
 else
     _feedback ABORT "Detected an issue with dependancy versions"
 fi
