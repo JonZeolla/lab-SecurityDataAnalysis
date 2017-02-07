@@ -4,7 +4,7 @@
 
 # =========================
 # Author:          Jon Zeolla (JZeolla, JonZeolla)
-# Last update:     2017-01-11
+# Last update:     2017-02-07
 # File Type:       Bash Script
 # Version:         1.0-ALPHA
 # Repository:      https://github.com/JZeolla/lab-SecurityDataAnalysis
@@ -70,8 +70,8 @@ component[python]="2.7.11"
 component[maven]="3.3.9"
 component[ez_setup]="bootstrap"
 component[metron]="master"
-versions[supported]+="0.3.0"
-versions[workaround]+="0.3.0"
+versions[supported]+=["0.3.0","0.3.1"]
+versions[workaround]+=["0.3.0","0.3.1"]
 
 
 ## Functions
@@ -176,8 +176,6 @@ function _managePackages() {
     case "${1}" in
         install)
             action="install" ;;
-        groupinstall)
-            action="groupinstall" ;;
         update)
             action="update" ;;
         *)
@@ -490,6 +488,11 @@ if [[ "${usetheforce}" != "1" ]]; then
     done
 fi
 
+# Make sure that this is being installed on a system with the GUI installed and running
+if [[ "${DESKTOP_SESSION}" ]]; then
+    _feedback ABORT "This script must be run on a system with the GUI installed and running"
+fi
+
 
 ## Check access which will be required later (filesystem ACLs, etc.)
 # TODO
@@ -505,11 +508,7 @@ if [[ "${OS[distro]}" == "CentOS" ]]; then
     # Be aware that the following commands may give a "repomd.xml does not match metalink for epel." error every once in a while due to epel resynchronization.
     _managePackages "install" "epel-release"
     _managePackages "update"
-    # Setup GUI (assuming minimal install)
-    _managePackages "groupinstall" "Development tools" "X Window System" "Desktop" "Desktop Platform"
     _managePackages "install" "gdm" "zlib-devel" "bzip2-devel" "openssl-devel" "ncurses-devel" "sqlite-devel" "readline-devel" "tk-devel" "gdbm-devel" "db4-devel" "libpcap-devel" "xz-devel" "dkms"
-    if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Making sure the system will boot into the GUI"; fi
-    sudo sed -i "26s/^id:3/id:5/" /etc/inittab || _feedback ERROR "Unable to modify /etc/inittab"
 fi
 
 # Set up a user
