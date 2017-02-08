@@ -4,10 +4,10 @@
 
 # =========================
 # Author:          Jon Zeolla (JZeolla, JonZeolla)
-# Last update:     2017-02-07
+# Last update:     2017-02-08
 # File Type:       Bash Script
 # Version:         1.0-ALPHA
-# Repository:      https://github.com/JZeolla/lab-SecurityDataAnalysis
+# Repository:      https://github.com/jonzeolla/lab-securitydataanalysis
 # Description:     This is a helper script to configure an Apache Metron (incubating) dev environment.
 #
 # Notes
@@ -70,8 +70,8 @@ component[python]="2.7.11"
 component[maven]="3.3.9"
 component[ez_setup]="bootstrap"
 component[metron]="master"
-versions[supported]+=["0.3.0","0.3.1"]
-versions[workaround]+=["0.3.0","0.3.1"]
+versions[supported]="0.3.0","0.3.1"
+versions[workaround]="0.3.0","0.3.1"
 
 
 ## Functions
@@ -125,6 +125,9 @@ function _quit() {
         scriptend=$(date +%s)
         if [[ "${verbose}" == "1" ]]; then
             _feedback VERBOSE "$(hostname):$(readlink -f ${0}) $* completed at [`date`] after $(python -c "print '%um:%02us' % ((${scriptend} - ${scriptbegin})/60, (${scriptend} - ${scriptbegin})%60)") with an exit code of ${exitCode}"
+        fi
+        if [[ "${exitCode}" == "0" ]]; then
+            _feedback INFO "Successfully installed and set up Apache Metron (incubating)!  Now how do I use this thing...?"
         fi
         exit "${exitCode}"
 }
@@ -489,7 +492,7 @@ if [[ "${usetheforce}" != "1" ]]; then
 fi
 
 # Make sure that this is being installed on a system with the GUI installed and running
-if [[ "${DESKTOP_SESSION}" ]]; then
+if [[ -z "${DESKTOP_SESSION}" ]]; then
     _feedback ABORT "This script must be run on a system with the GUI installed and running"
 fi
 
@@ -544,7 +547,7 @@ fi
 
 # Setup ez_setup
 if command -v easy_install-${component[python]:0:3} > /dev/null 2>&1 ; then
-    _feedback INFO "ez_python ${component[ez_setup]} ($(easy_install-${component[python]:0:3} | awk '{print $2}')) already appears to be active, skipping..."
+    _feedback INFO "ez_python ${component[ez_setup]} ($(easy_install-${component[python]:0:3} --version | awk '{print $2}')) already appears to be active, skipping..."
 else
     if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing ez_setup into $(_getDir "ez_setup")"; fi
     cd "$(_getDir "ez_setup")"
@@ -639,12 +642,14 @@ if [[ "Python ${component[python]}" == $(python --version 2>&1) && -x $(which ea
         if [[ "${usrCurrent}" == "${usrSpecified}" ]]; then
             if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Starting up metron's \"${deployChoice}\""; fi
             cd "$(_getDir "metron")/metron-deployment/vagrant/${deployChoice}"
-            # Fixed as of METRON-635
-            if [[ $(grep "^metron_version: " "$(_getDir "metron")/metron-deployment/inventory/${deployChoice}/group_vars/all" | awk '{print $NF}') =~ "${versions[workaround]}" ]]; then
-                if [[ "${testmode}" == "0" ]]; then
+            # Fixed as of METRON-635, awaiting merge via PR #411
+            # TODO: This solution is not super clean for the situation where the PR gets merged but a new release has not come out, but it should still work.  Probably worth a clean up at that point.
+            for version in $(echo "${versions[workaround]}" | tr , '\n'); do
+                if [[ $(grep "^metron_version: " "$(_getDir "metron")/metron-deployment/inventory/${deployChoice}/group_vars/all" | awk '{print $NF}') == "${version}" && "${testmode}" == "0" ]]; then
                     if ! grep -q "scp_if_ssh = True" "$(_getDir "metron")/metron-deployment/vagrant/${deployChoice}/ansible.cfg"; then
                         if grep -q "\[ssh_connection\]" "$(_getDir "metron")/metron-deployment/vagrant/${deployChoice}/ansible.cfg"; then
-                        sed -i '/\[ssh_connection\]/a scp_if_ssh = True' "$(_getDir "metron")/metron-deployment/vagrant/${deployChoice}/ansible.cfg" && addedscpifssh=1
+                            sed -i '/\[ssh_connection\]/a scp_if_ssh = True' "$(_getDir "metron")/metron-deployment/vagrant/${deployChoice}/ansible.cfg"
+                            addedscpifssh=1
                         else
                             echo -e "\n\n[ssh_connection]\nscp_if_ssh = True" >> "$(_getDir "metron")/metron-deployment/vagrant/${deployChoice}/ansible.cfg"
                             if [[ "$?" == 0 ]]; then
@@ -654,7 +659,7 @@ if [[ "Python ${component[python]}" == $(python --version 2>&1) && -x $(which ea
                         fi
                     fi
                 fi
-            fi
+            done
             sg vboxusers -c "vagrant up" || _feedback ERROR "Unable to run sg vboxusers -c \"vagrant up\""
             if [[ "${deployChoice}" == "codelab-platform" ]]; then
                 ./run.sh || _feedback ERROR "Unable to run ./run.sh"
