@@ -24,7 +24,7 @@ declare -r scriptbegin=$(date +%s)
 declare -r usrCurrent="${SUDO_USER:-${USER}}"
 declare -r unusedUID="$(awk -F: '{uid[$3]=1}END{for(x=1000;x<=1100;x++) {if(uid[x] != ""){}else{print x; exit;}}}' /etc/passwd)"
 declare -r metronRepo="git://github.com/apache/incubator-metron.git"
-declare -r OPTSPEC=':dfhm:p:stu:v-:'
+declare -r OPTSPEC=':bdfhm:p:stu:v-:'
 # Potential TOCTOU issue with startTime
 declare -r startTime="$(date +%Y-%m-%d_%H-%M)"
 declare -r txtDEFAULT='\033[0m'
