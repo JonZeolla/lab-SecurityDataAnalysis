@@ -501,7 +501,7 @@ if [[ "${usetheforce}" != "1" ]]; then
         read -p "This script is intended to be run on a fresh CentOS 6.8 installation and may have unintended side effects otherwise.  Do you want to continue (y/N)? " prompt
         case "${prompt}" in
             [yY]|[yY][eE][sS])
-                _feedback INFO "Please note that this script may take a long time (15+ minutes) to complete"
+                _feedback INFO "Please note that this script may take a long time (60+ minutes) to complete"
                 sleep 1s
                 _feedback INFO "Continuing..." ;;
             ""|[nN]|[nN][oO])
