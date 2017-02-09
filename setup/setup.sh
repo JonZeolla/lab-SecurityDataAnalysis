@@ -156,7 +156,7 @@ function _feedback() {
         issues+=("${2}")
         >&2 echo -e "${!color}${1}:\t\t${2}${txtDEFAULT}"
     else
-        echo -e "${!color}${1}:\t${2}${txtDEFAULT}"
+        echo -e "${!color}${1}:\t\t${2}${txtDEFAULT}"
     fi
 }
 
