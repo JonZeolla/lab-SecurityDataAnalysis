@@ -481,7 +481,7 @@ fi
 if [[ "${verbose}" == "1" ]]; then
     for k in "${!component[@]}"; do
         if [[ "${k}" != "metron" && "${prereqs[${k}]}" == "Expected" ]]; then
-            _feedback VERBOSE "${k} already has the correct version installed, no changes to be made for that package"
+            _feedback VERBOSE "${k} is the expected version, no changes to be made"
         elif [[ "${k}" == "metron" || "${prereqs[${k}]}" == "Unknown" ]]; then
             if [[ "${component[${k}]}" != "latest" && "${component[${k}]}" != "master" ]]; then
                 _feedback VERBOSE "Planning to use ${k} ${component[${k}]}"
