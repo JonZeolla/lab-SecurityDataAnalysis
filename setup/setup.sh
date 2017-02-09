@@ -53,6 +53,7 @@ declare -i modifiedvagrant=0
 declare -i testmode=0
 declare -i addedscpifssh=0
 declare -i addedbrackets=0
+declare -i buildthedocs=0
 # String Variables
 declare -- deployChoice=""
 declare -- action=""
@@ -212,8 +213,9 @@ function _showHelp() {
 
     # Note that the here-doc is purposefully using tabs, not spaces, for indentation
     cat <<- HEREDOC
-	Preferred Usage: ${0##*/} [-dfhs] [-m BRANCH1,BRANCH2,BRANCH3... | -p PR#] [-u USER] [--] [DEPLOYMENT CHOICE]
+	Preferred Usage: ${0##*/} [-bdfhs] [-m BRANCH1,BRANCH2,BRANCH3... | -p PR#] [-u USER] [--] [DEPLOYMENT CHOICE]
 
+	-b|--build			Build the related Metron documentation.
 	-d|--debug			Enable debugging.
 	-f|--force			Do not prompt before proceeding.
 	-h|--help			Print this help.
@@ -252,6 +254,8 @@ while getopts "${OPTSPEC}" optchar; do
             # Note that getopts does not perform OPTERR checking nor option-argument parsing for this section
             # For details, see http://stackoverflow.com/questions/402377/using-getopts-in-bash-shell-script-to-get-long-and-short-command-line-options/7680682#7680682
             case "${OPTARG}" in
+                build)
+                    buildthedocs=1 ;;
                 debug)
                     debugging=1 ;;
                 force)
@@ -322,6 +326,8 @@ while getopts "${OPTSPEC}" optchar; do
                     fi
                     ;;
             esac ;;
+        b)
+            buildthedocs=1 ;;
         d)
             debugging=1 ;;
         f)
@@ -399,7 +405,7 @@ case "${OSTYPE}" in
         if [[ -r /etc/centos-release ]]; then
             OS[distro]="$(awk -F\  '{print $1}' /etc/centos-release)"
             OS[version]="$(awk -F\  '{print $(NF-1)}' /etc/centos-release)"
-            if [[ "${OS[distro]}" == "CentOS" && ("${OS[version]}" == "6.8" || "${OS[version]}" =~ "7.2") ]]; then
+            if [[ "${OS[distro]}" == "CentOS" && ("${OS[version]}" == "6.8") ]]; then
                 OS[supported]="true"
             else
                 OS[supported]="false"
@@ -477,7 +483,7 @@ fi
 if [[ "${usetheforce}" != "1" ]]; then
     if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Asking the user for confirmation"; fi
     while [ -z "${prompt}" ]; do
-        read -p "This script is intended to be run on a fresh CentOS 6.8 or 7.2 installation and may have unintended side effects otherwise.  Do you want to continue (y/N)? " prompt
+        read -p "This script is intended to be run on a fresh CentOS 6.8 installation and may have unintended side effects otherwise.  Do you want to continue (y/N)? " prompt
         case "${prompt}" in
             [yY]|[yY][eE][sS])
                 _feedback INFO "Please note that this script may take a long time (15+ minutes) to complete"
@@ -630,6 +636,15 @@ elif [[ "${mergepr}" == "1" ]]; then
         _feedback "ABORT" "Something went wrong when trying to merge pr ${prSpecified} into $(_getDir "metron")"
     fi
 fi
+if [[ "${buildthedocs}" == "1" && "$(_getDir "metron")/metron-deployment/inventory/${deployChoice}/group_vars/all" | awk '{print $NF}') != "0.3.0" ]]; then
+    if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Building the related Metron docs"; fi
+    cd "$(_getDir "metron")/site-book"
+    bin/generate-md.sh || _feedback ERROR "Issue running generate-md.sh"
+    /usr/local/bin/mvn site:site || _feedback ERROR "Issue building the Metron docs"
+elif [[ $(grep "^metron_version: " "$(_getDir "metron")/metron-deployment/inventory/${deployChoice}/group_vars/all" | awk '{print $NF}') == "0.3.0" ]]; then
+    _feedback ERROR "Unable to build the docs on Metron 0.3.0 because that function didn't exist yet, please refer to the README.md files individually"
+fi
+if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Building Metron"; fi
 /usr/local/bin/mvn clean package -DskipTests || _feedback ABORT "Issue building Metron"
     
 if [[ "Python ${component[python]}" == $(python --version 2>&1) && -x $(which easy_install-${component[python]:0:3}) && "ansible ${component[ansible]}" == $(ansible --version | head -1) && "${component[virtualbox]%%_*}" == "$(vboxmanage --version | cut -f1 -d'r')" && "Vagrant ${component[vagrant]}" == $(vagrant --version) ]]; then
