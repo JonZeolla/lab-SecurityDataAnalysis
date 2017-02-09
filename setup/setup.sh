@@ -4,7 +4,7 @@
 
 # =========================
 # Author:          Jon Zeolla (JZeolla, JonZeolla)
-# Last update:     2017-02-09
+# Last update:     2017-02-10
 # File Type:       Bash Script
 # Version:         1.0-ALPHA
 # Repository:      https://github.com/jonzeolla/lab-securitydataanalysis
@@ -23,7 +23,7 @@
 declare -r scriptbegin=$(date +%s)
 declare -r usrCurrent="${SUDO_USER:-${USER}}"
 declare -r unusedUID="$(awk -F: '{uid[$3]=1}END{for(x=1000;x<=1100;x++) {if(uid[x] != ""){}else{print x; exit;}}}' /etc/passwd)"
-declare -r metronRepo="git://github.com/apache/incubator-metron.git"
+declare -r metronRepo="https://github.com/apache/incubator-metron"
 declare -r OPTSPEC=':bdfhm:p:stu:v-:'
 # Potential TOCTOU issue with startTime
 declare -r startTime="$(date +%Y-%m-%d_%H-%M)"
@@ -40,7 +40,7 @@ declare -a branches
 declare -A component
 declare -A OS
 declare -A versions
-declare -A prereq
+declare -A prereqs
 # Integer Variables
 declare -i exitCode=0
 declare -i verbose=0
@@ -189,6 +189,8 @@ function _managePackages() {
     case "${1}" in
         install)
             action="install" ;;
+        groupinstall)
+            action="groupinstall" ;;
         update)
             action="update" ;;
         *)
@@ -531,6 +533,8 @@ if [[ "${OS[distro]}" == "CentOS" ]]; then
     # Be aware that the following commands may give a "repomd.xml does not match metalink for epel." error every once in a while due to epel resynchronization.
     _managePackages "install" "epel-release"
     _managePackages "update"
+    _managePackages "groupinstall" "Development tools" "X Window System" "Desktop" "Desktop Platform"
+    if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Almost there!  Installing some more pre-reqs..."; fi
     _managePackages "install" "gdm" "zlib-devel" "bzip2-devel" "openssl-devel" "ncurses-devel" "sqlite-devel" "readline-devel" "tk-devel" "gdbm-devel" "db4-devel" "libpcap-devel" "xz-devel" "dkms"
 fi
 

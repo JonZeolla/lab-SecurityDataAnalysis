@@ -20,5 +20,11 @@ An introductory lab to Security Data Analysis (using Apache Metron (incubating))
 Event Details coming soon
 
 ## How to use this repo
+### Setup
 * Run `setup/setup.sh` to setup the lab.
+### Example Guides to follow
+* [Metron Reference Application](https://goo.gl/q09Hgs)
+* [Stellar REPL](https://goo.gl/ublkds)
+* [Outlier Analysis](https://goo.gl/wFa9hX) ([video](https://goo.gl/rF7wLt))
+* [Custom Stellar Functions](https://goo.gl/9vKlOv)
 
