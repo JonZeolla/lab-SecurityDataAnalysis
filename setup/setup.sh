@@ -40,6 +40,7 @@ declare -a branches
 declare -A component
 declare -A OS
 declare -A versions
+declare -A prereq
 # Integer Variables
 declare -i exitCode=0
 declare -i verbose=0
@@ -73,6 +74,14 @@ component[ez_setup]="bootstrap"
 component[metron]="master"
 versions[supported]="0.3.0","0.3.1"
 versions[workaround]="0.3.0","0.3.1"
+
+## Populate additional, more dynamic variables
+if command -v python > /dev/null 2>&1 && [[ "Python ${component[python]}" == "$(python --version 2>&1)" ]]; then prereqs[python]="Expected"; else prereqs[python]="Unknown"; fi
+if command -v easy_install-${component[python]:0:3} > /dev/null 2>&1 ; then prereqs[ez_setup]="Expected"; else prereqs[ez_setup]="Unknown"; fi
+if command -v ansible > /dev/null 2>&1 && [[ "ansible ${component[ansible]}" == "$(ansible --version | head -1)" ]]; then prereqs[ansible]="Expected"; else prereqs[ansible]="Unknown"; fi
+if command -v mvn > /dev/null 2>&1 && [[ "Apache Maven ${component[maven]}" == "$(mvn --version | head -1 | awk '{print $1,$2,$3}')" ]]; then prereqs[maven]="Expected"; else prereqs[maven]="Unknown"; fi
+if command -v virtualbox > /dev/null 2>&1 && [[ "${component[virtualbox]%%_*}" == "$(vboxmanage --version | cut -f1 -d'r')" ]]; then prereqs[virtualbox]="Expected"; else prereqs[virtualbox]="Unknown"; fi
+if command -v vagrant > /dev/null 2>&1 && [[ "Vagrant ${component[vagrant]}" == $(vagrant --version) ]]; then prereqs[vagrant]="Expected"; else prereqs[vagrant]="Unknown"; fi
 
 
 ## Functions
@@ -471,10 +480,16 @@ fi
 # Ask the user for confirmation
 if [[ "${verbose}" == "1" ]]; then
     for k in "${!component[@]}"; do
-        if [[ "${component[${k}]}" != "latest" && "${component[${k}]}" != "master" ]]; then
-            _feedback VERBOSE "Planning to use ${k} ${component[${k}]}"
+        if [[ "${k}" != "metron" && "${prereqs[${k}]}" == "Expected" ]]; then
+            _feedback VERBOSE "${k} already has the correct version installed, no changes to be made for that package"
+        elif [[ "${k}" == "metron" || "${prereqs[${k}]}" == "Unknown" ]]; then
+            if [[ "${component[${k}]}" != "latest" && "${component[${k}]}" != "master" ]]; then
+                _feedback VERBOSE "Planning to use ${k} ${component[${k}]}"
+            else
+                _feedback VERBOSE "Planning to use the latest version of ${k} as of ${startTime}"
+            fi
         else
-            _feedback VERBOSE "Planning to use the latest version of ${k} as of ${startTime}"
+            _feedback ABORT "Unknown error preparing feedback language"
         fi
     done
 fi
@@ -538,8 +553,7 @@ for k in "${!component[@]}"; do
 done
 
 # Setup python
-# TODO: Consider using python -c 'import sys;print(sys.version_info[:3])' instead of python --version?
-if command -v python > /dev/null 2>&1 && [[ "Python ${component[python]}" == "$(python --version 2>&1)" ]]; then
+if [[ "${prereqs[python]}" == "Expected" ]]; then
     _feedback INFO "Python ${component[python]} already appears to be active, skipping..."
 else
     if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing python into $(_getDir "python")"; fi
@@ -552,7 +566,7 @@ else
 fi
 
 # Setup ez_setup
-if command -v easy_install-${component[python]:0:3} > /dev/null 2>&1 ; then
+if [[ "${prereqs[ez_setup]}" == "Expected" ]]; then
     _feedback INFO "ez_python ${component[ez_setup]} ($(easy_install-${component[python]:0:3} --version | awk '{print $2}')) already appears to be active, skipping..."
 else
     if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing ez_setup into $(_getDir "ez_setup")"; fi
@@ -565,7 +579,7 @@ fi
 
 
 # Setup ansible
-if command -v ansible > /dev/null 2>&1 && [[ "ansible ${component[ansible]}" == "$(ansible --version | head -1)" ]]; then
+if [[ "${prereqs[ansible]}" == "Expected" ]]; then
     _feedback INFO "Ansible ${component[ansible]} already appears to be active, skipping..."
 else
     if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing ansible using pip"; fi
@@ -573,7 +587,7 @@ else
 fi
 
 # Setup maven
-if command -v mvn > /dev/null 2>&1 && [[ "Apache Maven ${component[maven]}" == "$(mvn --version | head -1 | awk '{print $1,$2,$3}')" ]]; then
+if [[ "${prereqs[maven]}" == "Expected" ]]; then
     _feedback INFO "Maven ${component[maven]} already appears to be active, skipping..."
 else
     if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing maven into $(_getDir "maven")"; fi
@@ -589,7 +603,7 @@ else
 fi
 
 # Setup virtualbox
-if command -v virtualbox > /dev/null 2>&1 && [[ "${component[virtualbox]%%_*}" == "$(vboxmanage --version | cut -f1 -d'r')" ]]; then
+if [[ "${prereqs[virtualbox]}" == "Expected" ]]; then
     _feedback INFO "Virtualbox ${component[virtualbox]%%_*} already appears to be active, skipping..."
 else
     if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing virtualbox into $(_getDir "virtualbox")"; fi
@@ -603,7 +617,7 @@ else
 fi 
 
 # Setup vagrant
-if command -v vagrant > /dev/null 2>&1 && [[ "Vagrant ${component[vagrant]}" == $(vagrant --version) ]]; then
+if [[ "${prereqs[vagrant]}" == "Expected" ]]; then
     _feedback INFO "Vagrant ${component[vagrant]} already appears to be active, skipping..."
 else
     if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing vagrant into $(_getDir "vagrant")"; fi
