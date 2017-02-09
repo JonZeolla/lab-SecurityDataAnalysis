@@ -4,7 +4,7 @@
 
 # =========================
 # Author:          Jon Zeolla (JZeolla, JonZeolla)
-# Last update:     2017-02-08
+# Last update:     2017-02-09
 # File Type:       Bash Script
 # Version:         1.0-ALPHA
 # Repository:      https://github.com/jonzeolla/lab-securitydataanalysis
@@ -655,8 +655,10 @@ if [[ "${buildthedocs}" == "1" && $(grep "^metron_version: " "$(_getDir "metron"
     cd "$(_getDir "metron")/site-book"
     bin/generate-md.sh || _feedback ERROR "Issue running generate-md.sh"
     /usr/local/bin/mvn site:site || _feedback ERROR "Issue building the Metron docs"
-elif [[ "${buildthedocs}" == "0" && $(grep "^metron_version: " "$(_getDir "metron")/metron-deployment/inventory/${deployChoice}/group_vars/all" | awk '{print $NF}') == "0.3.0" ]]; then
+elif [[ "${buildthedocs}" == "1" && $(grep "^metron_version: " "$(_getDir "metron")/metron-deployment/inventory/${deployChoice}/group_vars/all" | awk '{print $NF}') == "0.3.0" ]]; then
     _feedback ERROR "Unable to build the docs on Metron 0.3.0 because that function didn't exist yet, please refer to the README.md files individually"
+elif [[ "${buildthedocs}" == "0" ]]; then
+    if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Skipping documentation build, as it was not requested"; fi
 else
     _feedback ABORT "Unknown error during document building logic"
 fi
