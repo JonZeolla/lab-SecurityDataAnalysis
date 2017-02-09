@@ -650,13 +650,15 @@ elif [[ "${mergepr}" == "1" ]]; then
         _feedback "ABORT" "Something went wrong when trying to merge pr ${prSpecified} into $(_getDir "metron")"
     fi
 fi
-if [[ "${buildthedocs}" == "1" && "$(_getDir "metron")/metron-deployment/inventory/${deployChoice}/group_vars/all" | awk '{print $NF}') != "0.3.0" ]]; then
+if [[ "${buildthedocs}" == "1" && $(grep "^metron_version: " "$(_getDir "metron")/metron-deployment/inventory/${deployChoice}/group_vars/all" | awk '{print $NF}') != "0.3.0" ]]; then
     if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Building the related Metron docs"; fi
     cd "$(_getDir "metron")/site-book"
     bin/generate-md.sh || _feedback ERROR "Issue running generate-md.sh"
     /usr/local/bin/mvn site:site || _feedback ERROR "Issue building the Metron docs"
-elif [[ $(grep "^metron_version: " "$(_getDir "metron")/metron-deployment/inventory/${deployChoice}/group_vars/all" | awk '{print $NF}') == "0.3.0" ]]; then
+elif [[ "${buildthedocs}" == "0" && $(grep "^metron_version: " "$(_getDir "metron")/metron-deployment/inventory/${deployChoice}/group_vars/all" | awk '{print $NF}') == "0.3.0" ]]; then
     _feedback ERROR "Unable to build the docs on Metron 0.3.0 because that function didn't exist yet, please refer to the README.md files individually"
+else
+    _feedback ABORT "Unknown error during document building logic"
 fi
 if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Building Metron"; fi
 /usr/local/bin/mvn clean package -DskipTests || _feedback ABORT "Issue building Metron"
