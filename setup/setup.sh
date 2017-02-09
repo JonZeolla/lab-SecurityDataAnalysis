@@ -502,8 +502,7 @@ if [[ "${usetheforce}" != "1" ]]; then
         case "${prompt}" in
             [yY]|[yY][eE][sS])
                 _feedback INFO "Please note that this script may take a long time (60+ minutes) to complete"
-                sleep 1s
-                _feedback INFO "Continuing..." ;;
+                sleep 1s ;;
             ""|[nN]|[nN][oO])
                 _feedback ABORT "Did not want to continue" ;;
             *)
