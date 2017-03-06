@@ -4,7 +4,7 @@
 
 # =========================
 # Author:          Jon Zeolla (JZeolla, JonZeolla)
-# Last update:     2017-02-08
+# Last update:     2017-03-06
 # File Type:       Bash Script
 # Version:         1.0-ALPHA
 # Repository:      https://github.com/jonzeolla/lab-securitydataanalysis
@@ -24,12 +24,13 @@ declare -r scriptbegin=$(date +%s)
 declare -r usrCurrent="${SUDO_USER:-${USER}}"
 declare -r unusedUID="$(awk -F: '{uid[$3]=1}END{for(x=1000;x<=1100;x++) {if(uid[x] != ""){}else{print x; exit;}}}' /etc/passwd)"
 declare -r metronRepo="https://github.com/apache/incubator-metron"
-declare -r OPTSPEC=':dfhm:p:stu:v-:'
+declare -r OPTSPEC=':bdfhm:np:stu:v-:'
 # Potential TOCTOU issue with startTime
 declare -r startTime="$(date +%Y-%m-%d_%H-%M)"
 declare -r txtDEFAULT='\033[0m'
 declare -r txtVERBOSE='\033[33;34m'
 declare -r txtINFO='\033[0;30m'
+declare -r txtDRY='\033[0m'
 declare -r txtWARN='\033[0;33m'
 declare -r txtERROR='\033[0;31m'
 declare -r txtABORT='\033[1;31m'
@@ -40,6 +41,7 @@ declare -a branches
 declare -A component
 declare -A OS
 declare -A versions
+declare -A prereqs
 # Integer Variables
 declare -i exitCode=0
 declare -i verbose=0
@@ -53,6 +55,7 @@ declare -i modifiedvagrant=0
 declare -i testmode=0
 declare -i addedscpifssh=0
 declare -i addedbrackets=0
+declare -i buildthedocs=0
 # String Variables
 declare -- deployChoice=""
 declare -- action=""
@@ -73,6 +76,14 @@ component[metron]="master"
 versions[supported]="0.3.0","0.3.1"
 versions[workaround]="0.3.0","0.3.1"
 
+## Populate additional, more dynamic variables
+if command -v python > /dev/null 2>&1 && [[ "Python ${component[python]}" == "$(python --version 2>&1)" ]]; then prereqs[python]="Expected"; else prereqs[python]="Unknown"; fi
+if command -v easy_install-${component[python]:0:3} > /dev/null 2>&1 ; then prereqs[ez_setup]="Expected"; else prereqs[ez_setup]="Unknown"; fi
+if command -v ansible > /dev/null 2>&1 && [[ "ansible ${component[ansible]}" == "$(ansible --version | head -1)" ]]; then prereqs[ansible]="Expected"; else prereqs[ansible]="Unknown"; fi
+if command -v mvn > /dev/null 2>&1 && [[ "Apache Maven ${component[maven]}" == "$(mvn --version | head -1 | awk '{print $1,$2,$3}')" ]]; then prereqs[maven]="Expected"; else prereqs[maven]="Unknown"; fi
+if command -v virtualbox > /dev/null 2>&1 && [[ "${component[virtualbox]%%_*}" == "$(vboxmanage --version | cut -f1 -d'r')" ]]; then prereqs[virtualbox]="Expected"; else prereqs[virtualbox]="Unknown"; fi
+if command -v vagrant > /dev/null 2>&1 && [[ "Vagrant ${component[vagrant]}" == $(vagrant --version) ]]; then prereqs[vagrant]="Expected"; else prereqs[vagrant]="Unknown"; fi
+
 
 ## Functions
 function _getDir() {
@@ -89,34 +100,32 @@ function _getDir() {
 
 function _cleanup() {
     ## Cleanup temporary files, remove empty directories, fix ownership, etc.
-    # Make sure the user was created, if not then there is no cleanup to attempt
+    # Make sure the user was created (or already existed), if not then there is no cleanup to attempt
     if getent passwd ${usrSpecified} > /dev/null; then
         for downloadedFile in "${downloaded[@]}"; do
+            # TODO: Need to revisit this section
             if [[ -n "${downloadedFile}" ]]; then
-                if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Removing ${downloadedFile}"; fi
+                _feedback VERBOSE "Removing ${downloadedFile}"
                 # the -r is required in case this is a folder, such as when "${downloadedFile}" is a git repo
                 rm -rf "${downloadedFile}"
             fi
         done
 
         for k in "${!component[@]}"; do
-            if [[ -d "$(_getDir "${k}")" ]]; then
-                if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Recursively chowning $(_getDir ${k}) to have a owner and group of ${usrSpecified}"; fi
+            if [[ -d "$(_getDir "${k}")" && "${dryrun}" == "0" ]]; then
+                _feedback VERBOSE "Recursively chowning $(_getDir ${k}) to have a owner and group of ${usrSpecified}"
                 sudo chown -R "${usrSpecified}:" "$(_getDir ${k})"
-            elif [[ -d "$(_getDir "${k}")" ]]; then
-                if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Deleting empty directories related to ${k}"; fi
-                rmdir "$(_getDir "${k}")" "$(_getDir "${k}")/.."
+                _feedback VERBOSE "Deleting empty directories related to ${k}, if they exist"
+                rmdir -p "$(_getDir "${k}")/.." 2>/dev/null
             fi
         done
     else
-        if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "${usrSpecified} was never created, skipping cleanup"; fi
+        _feedback VERBOSE "${usrSpecified} was never created or was removed in a really tricky way, skipping cleanup"
     fi
     
-    if [[ "${verbose}" == "1" ]]; then
-        for issue in "${issues[@]}"; do
-            _feedback VERBOSE "Issue encountered - ${issue}"
-        done
-    fi
+    for issue in "${issues[@]}"; do
+        _feedback VERBOSE "Issue encountered - ${issue}"
+    done
 }
 
 function _quit() {
@@ -126,7 +135,7 @@ function _quit() {
         if [[ "${verbose}" == "1" ]]; then
             _feedback VERBOSE "$(hostname):$(readlink -f ${0}) $* completed at [`date`] after $(python -c "print '%um:%02us' % ((${scriptend} - ${scriptbegin})/60, (${scriptend} - ${scriptbegin})%60)") with an exit code of ${exitCode}"
         fi
-        if [[ "${exitCode}" == "0" ]]; then
+        if [[ "${exitCode}" == "0" && "${dryrun}" == "0" ]]; then
             _feedback INFO "Successfully installed and set up Apache Metron (incubating)!  Now how do I use this thing...?"
         fi
         exit "${exitCode}"
@@ -134,20 +143,28 @@ function _quit() {
 
 function _feedback() {
     color="txt${1:-DEFAULT}"
-    if [[ "${1}" == "ABORT" ]]; then
-        # TODO: Test stderr
-        >&2 echo -e "${!color}ERROR:\t\t${2}, aborting...${txtDEFAULT}"
-        _quit 1
-    elif [[ "${1}" == "ERROR" ]]; then
-        exitCode=1
-        issues+=("${2}")
-        >&2 echo -e "${!color}${1}:\t\t${2}${txtDEFAULT}"
-    elif [[ "${1}" == "WARN" ]]; then
-        issues+=("${2}")
-        >&2 echo -e "${!color}${1}:\t\t${2}${txtDEFAULT}"
-    else
-        echo -e "${!color}${1}:\t${2}${txtDEFAULT}"
-    fi
+    case "${1}" in
+        ABORT)
+            # TODO: Test stderr
+            >&2 echo -e "${!color}ERROR:\t\t${2}, aborting...${txtDEFAULT}"
+            _quit 1
+            ;;
+        ERROR)
+            exitCode=1
+            issues+=("${2}")
+            >&2 echo -e "${!color}${1}:\t\t${2}${txtDEFAULT}"
+            ;;
+        WARN)
+            issues+=("${2}")
+            >&2 echo -e "${!color}${1}:\t\t${2}${txtDEFAULT}"
+            ;;
+        VERBOSE)
+            if [[ "${verbose}" == "1" ]]; then echo -e "${!color}${1}:\t${2}${txtDEFAULT}"; fi
+            ;;
+        *)
+            echo -e "${!color}${1}:\t\t${2}${txtDEFAULT}"
+            ;;
+    esac
 }
 
 function _downloadit() {
@@ -212,15 +229,17 @@ function _showHelp() {
 
     # Note that the here-doc is purposefully using tabs, not spaces, for indentation
     cat <<- HEREDOC
-	Preferred Usage: ${0##*/} [-dfhs] [-m BRANCH1,BRANCH2,BRANCH3... | -p PR#] [-u USER] [--] [DEPLOYMENT CHOICE]
+	Preferred Usage: ${0##*/} [-bdfhns] [-m BRANCH1,BRANCH2,BRANCH3... | -p PR#] [-u USER] [--] [DEPLOYMENT CHOICE]
 
+	-b|--build			Build the related Metron documentation.
 	-d|--debug			Enable debugging.
 	-f|--force			Do not prompt before proceeding.
 	-h|--help			Print this help.
 	-m|--merge			Merge a specified branch or set of branches into metron before building.  Currently mutually exclusive with -p|--pr.
+	-n|--dry-run			Show what would have been done.  NOT currently 100% functional.
 	-p|--pr				Merge a specified pr into metron before building.  Currently mutually exclusive with -m|--merge.
 	-s|--start			Start Metron by default.
-	-u|--user			Specify the user.
+	-u|--user			Specify the user to use for certain tasks.
 	-v|--verbose			Add verbosity.
 	DEPLOYMENT CHOICE		Choose one of QUICK or FULL.
 
@@ -228,6 +247,7 @@ function _showHelp() {
 	    Written by Jon Zeolla.
 
 	BUGS
+	    The -n dry run flag does NOT currently work.
 	    The long options have not been thoroughly tested, and are probably rife with bugs, hence the preferred usage suggests only short options.
 	    The -t flag is not listed above, as it is only meant to be used by the author.
 	HEREDOC
@@ -252,8 +272,12 @@ while getopts "${OPTSPEC}" optchar; do
             # Note that getopts does not perform OPTERR checking nor option-argument parsing for this section
             # For details, see http://stackoverflow.com/questions/402377/using-getopts-in-bash-shell-script-to-get-long-and-short-command-line-options/7680682#7680682
             case "${OPTARG}" in
+                build)
+                    buildthedocs=1 ;;
                 debug)
                     debugging=1 ;;
+                dry-run)
+                    dryrun=1 ;;
                 force)
                     usetheforce=1 ;;
                 help)
@@ -322,6 +346,8 @@ while getopts "${OPTSPEC}" optchar; do
                     fi
                     ;;
             esac ;;
+        b)
+            buildthedocs=1 ;;
         d)
             debugging=1 ;;
         f)
@@ -334,6 +360,8 @@ while getopts "${OPTSPEC}" optchar; do
                 branches+=("${branch}")
             done
             ;;
+        n)
+            dryrun=1 ;;
         p)
             mergepr=1
             prSpecified="${OPTARG}"
@@ -435,7 +463,7 @@ if [[ "${OS[supported]}" == "true" ]]; then
     else
         OS[packagemanager]="Unknown"
     fi
-    if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Your OS is supported (Distro: ${OS[distro]}, Version ${OS[version]})"; fi
+    _feedback VERBOSE "Your OS is supported (Distro: ${OS[distro]}, Version ${OS[version]})"
 elif [[ "${OS[supported]}" == "false" ]]; then
     _feedback ABORT "Your OS is not supported (Distro: ${OS[distro]}, Version ${OS[version]})"
 else
@@ -444,45 +472,81 @@ fi
 
 
 # Ensure basic tool(s)
-if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing some basic tools"; fi
+_feedback VERBOSE "Installing some basic tools"
 if [[ "${OS[distro]}" == "CentOS" && "${OS[supported]}" == "true" ]]; then
     if ! command -v wget > /dev/null 2>&1 ; then
-        _managePackages "install" "wget"
+        if [[ "${dryrun}" == "1" ]]; then
+            _feedback DRY "Install wget using ${OS[packagemanager]}"
+        else
+            _managePackages "install" "wget"
+        fi
     fi
-    _managePackages "install" "yum-utils"
+    if [[ "${dryrun}" == "1" ]]; then
+        _feedback DRY "Install yum-utils using ${OS[packagemanager]}"
+    else
+        _managePackages "install" "yum-utils"
+    fi
 fi
 
 # Check network connectivity
-if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Checking network connectivity"; fi
+_feedback VERBOSE "Checking network connectivity"
 wget -q --spider 'www.github.com' || _feedback ABORT "Unable to contact github.com"
 
 # Check for virtualization extensions
-if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Ensuring that virtualization extensions are available"; fi
+_feedback VERBOSE "Ensuring that virtualization extensions are available"
 if ! egrep '(vmx|svm)' /proc/cpuinfo > /dev/null 2>&1 ; then
     _feedback ABORT "Your system does not support virtualization, which is required for this system to run Metron using vagrant and virtualbox"
 fi
 
-# Ask the user for confirmation
-if [[ "${verbose}" == "1" ]]; then
-    for k in "${!component[@]}"; do
-        if [[ "${component[${k}]}" != "latest" && "${component[${k}]}" != "master" ]]; then
-            _feedback VERBOSE "Planning to use ${k} ${component[${k}]}"
+# Make sure that this is being installed on a system with the GUI installed and running
+if [[ -z "${DESKTOP_SESSION}" ]]; then
+    _feedback ABORT "This script must be run on a system with the GUI installed and running"
+fi
+
+# Default the user to the current user if it wasn't set
+usrSpecified="${usrSpecified:-$USER}"
+
+# Status update
+for k in "${!component[@]}"; do
+    if [[ "${k}" != "metron" && "${prereqs[${k}]}" == "Expected" ]]; then
+        if [[ "${dryrun}" == "1" ]]; then
+            _feedback DRY "Don't modify ${k} because it is the expected version of ${component[${k}]}"
         else
-            _feedback VERBOSE "Planning to use the latest version of ${k} as of ${startTime}"
+            _feedback VERBOSE "${k} is the expected version, no changes to be made"
         fi
-    done
+    elif [[ "${k}" == "metron" || "${prereqs[${k}]}" == "Unknown" ]]; then
+        if [[ "${component[${k}]}" != "latest" && "${component[${k}]}" != "master" ]]; then
+            if [[ "${dryrun}" == "1" ]]; then
+                _feedback DRY "Install ${k} ${component[${k}]}"
+            else
+                _feedback INFO "Planning to install ${k} ${component[${k}]}"
+            fi
+        else
+            if [[ "${dryrun}" == "1" ]]; then
+                _feedback DRY "Install the latest version of ${k} as of ${startTime}"
+            else
+                _feedback INFO "Planning to install the latest version of ${k} as of ${startTime}"
+            fi
+        fi
+    else
+        _feedback ABORT "Unknown error preparing feedback language"
+    fi
+done
+
+if [[ "${dryrun}" == "1" ]]; then
+    _feedback VERBOSE "Dry run ending early, as I wouldn't want to unintentionally change something during a dry run"
+    _quit "${exitCode}"
 fi
 
 # TODO: This needs tested
 if [[ "${usetheforce}" != "1" ]]; then
-    if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Asking the user for confirmation"; fi
+    _feedback VERBOSE "Asking the user for confirmation"
     while [ -z "${prompt}" ]; do
         read -p "This script is intended to be run on a fresh CentOS 6.8 or 7.2 installation and may have unintended side effects otherwise.  Do you want to continue (y/N)? " prompt
         case "${prompt}" in
             [yY]|[yY][eE][sS])
-                _feedback INFO "Please note that this script may take a long time (15+ minutes) to complete"
-                sleep 1s
-                _feedback INFO "Continuing..." ;;
+                _feedback INFO "Please note that this script may take a long time (60+ minutes) to complete"
+                sleep 1s ;;
             ""|[nN]|[nN][oO])
                 _feedback ABORT "Did not want to continue" ;;
             *)
@@ -502,41 +566,40 @@ fi
 
 
 ## Beginning of main script
-# Default the user to the current user if it wasn't set
-usrSpecified="${usrSpecified:-$USER}"
-
 # Install pre-reqs
 if [[ "${OS[distro]}" == "CentOS" ]]; then
-    if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing some CentOS pre-reqs"; fi
+    _feedback VERBOSE "Installing some CentOS pre-reqs"
     # Be aware that the following commands may give a "repomd.xml does not match metalink for epel." error every once in a while due to epel resynchronization.
     _managePackages "install" "epel-release"
     _managePackages "update"
+    _managePackages "groupinstall" "Development tools" "X Window System" "Desktop" "Desktop Platform"
+    _feedback VERBOSE "Almost there!  Installing some more pre-reqs..."
     _managePackages "install" "gdm" "zlib-devel" "bzip2-devel" "openssl-devel" "ncurses-devel" "sqlite-devel" "readline-devel" "tk-devel" "gdbm-devel" "db4-devel" "libpcap-devel" "xz-devel" "dkms"
 fi
 
 # Set up a user
 if [[ "${usrSpecified}" != "${USER}" ]]; then
-    if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Creating a new user and group of ${usrSpecified}"; fi
+    _feedback VERBOSE "Creating a new user and group of ${usrSpecified}"
     sudo groupadd -g "${unusedUID}" "${usrSpecified}" || _feedback ERROR "Unable to create group ${usrSpecified} with GID ${unusedUID}"
     sudo useradd -d "/home/${usrSpecified}" -g "${usrSpecified}" -G wheel -s /bin/bash -u "${unusedUID}" "${usrSpecified}" || _feedback ERROR "Unable to create user ${usrSpecified} with UID ${unusedUID}"
     sudo passwd "${usrSpecified}" || _feedback ERROR "Unable to reset the password for ${usrSpecified}"
-    if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Giving ${usrSpecified} full sudo access"; fi
+    _feedback VERBOSE "Giving ${usrSpecified} full sudo access"
     sudo sed -i "98s/^# //" /etc/sudoers || _feedback ERROR "Unable to modify /etc/sudoers"
 fi
 
 # Setup some directories
 for k in "${!component[@]}"; do
-    if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Setting up an install directory for ${k}"; fi
+    _feedback VERBOSE "Setting up an install directory for ${k}"
     sudo mkdir -p "$(_getDir ${k})" || _feedback ERROR "Unable to mkdir $(_getDir ${k})"
     sudo chown "${usrSpecified}:" "$(_getDir ${k})" || _feedback ERROR "Unable to chown ${usrSpecified}: $(_getDir ${k})"
 done
 
 # Setup python
 # TODO: Consider using python -c 'import sys;print(sys.version_info[:3])' instead of python --version?
-if command -v python > /dev/null 2>&1 && [[ "Python ${component[python]}" == "$(python --version 2>&1)" ]]; then
+if [[ "${prereqs[python]}" == "Expected" ]]; then
     _feedback INFO "Python ${component[python]} already appears to be active, skipping..."
 else
-    if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing python into $(_getDir "python")"; fi
+    _feedback VERBOSE "Installing python into $(_getDir "python")"
     cd "$(_getDir "python")"
     _downloadit "https://www.python.org/ftp/python/${component[python]}/Python-${component[python]}.tgz"
     tar -xvf "Python-${component[python]}.tgz" --strip 1 || _feedback ERROR "Unable to untar $(_getDir "python")/Python-${component[python]}.tgz"
@@ -546,10 +609,10 @@ else
 fi
 
 # Setup ez_setup
-if command -v easy_install-${component[python]:0:3} > /dev/null 2>&1 ; then
+if [[ "${prereqs[ez_setup]}" == "Expected" ]]; then
     _feedback INFO "ez_python ${component[ez_setup]} ($(easy_install-${component[python]:0:3} --version | awk '{print $2}')) already appears to be active, skipping..."
 else
-    if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing ez_setup into $(_getDir "ez_setup")"; fi
+    _feedback VERBOSE "Installing ez_setup into $(_getDir "ez_setup")"
     cd "$(_getDir "ez_setup")"
     _downloadit "https://bootstrap.pypa.io/ez_setup.py"
     sudo /usr/local/bin/python ez_setup.py || _feedback ERROR "Unable to setup ez_python.py"
@@ -559,18 +622,18 @@ fi
 
 
 # Setup ansible
-if command -v ansible > /dev/null 2>&1 && [[ "ansible ${component[ansible]}" == "$(ansible --version | head -1)" ]]; then
+if [[ "${prereqs[ansible]}" == "Expected" ]]; then
     _feedback INFO "Ansible ${component[ansible]} already appears to be active, skipping..."
 else
-    if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing ansible using pip"; fi
+    _feedback VERBOSE "Installing ansible using pip"
     sudo /usr/local/bin/pip -q install "ansible==${component[ansible]}" || _feedback ERROR "Unable to install ansible"
 fi
 
 # Setup maven
-if command -v mvn > /dev/null 2>&1 && [[ "Apache Maven ${component[maven]}" == "$(mvn --version | head -1 | awk '{print $1,$2,$3}')" ]]; then
+if [[ "${prereqs[maven]}" == "Expected" ]]; then
     _feedback INFO "Maven ${component[maven]} already appears to be active, skipping..."
 else
-    if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing maven into $(_getDir "maven")"; fi
+    _feedback VERBOSE "Installing maven into $(_getDir "maven")"
     cd "$(_getDir "maven")"
     _managePackages "install" "java-1.8.0-openjdk-devel"
     _downloadit "http://mirrors.ibiblio.org/apache/maven/maven-${component[maven]:0:1}/${component[maven]}/binaries/apache-maven-${component[maven]}-bin.tar.gz"
@@ -583,10 +646,10 @@ else
 fi
 
 # Setup virtualbox
-if command -v virtualbox > /dev/null 2>&1 && [[ "${component[virtualbox]%%_*}" == "$(vboxmanage --version | cut -f1 -d'r')" ]]; then
+if [[ "${prereqs[virtualbox]}" == "Expected" ]]; then
     _feedback INFO "Virtualbox ${component[virtualbox]%%_*} already appears to be active, skipping..."
 else
-    if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing virtualbox into $(_getDir "virtualbox")"; fi
+    _feedback VERBOSE "Installing virtualbox into $(_getDir "virtualbox")"
     cd "$(_getDir "virtualbox")"
     _downloadit "http://download.virtualbox.org/virtualbox/${component[virtualbox]%%_*}/VirtualBox-${component[virtualbox]:0:3}-${component[virtualbox]}_el6-1.x86_64.rpm"
     _managePackages "install" "VirtualBox-${component[virtualbox]:0:3}-${component[virtualbox]}_el6-1.x86_64.rpm"
@@ -597,10 +660,10 @@ else
 fi 
 
 # Setup vagrant
-if command -v vagrant > /dev/null 2>&1 && [[ "Vagrant ${component[vagrant]}" == $(vagrant --version) ]]; then
+if [[ "${prereqs[vagrant]}" == "Expected" ]]; then
     _feedback INFO "Vagrant ${component[vagrant]} already appears to be active, skipping..."
 else
-    if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing vagrant into $(_getDir "vagrant")"; fi
+    _feedback VERBOSE "Installing vagrant into $(_getDir "vagrant")"
     cd "$(_getDir "vagrant")"
     _downloadit "https://releases.hashicorp.com/vagrant/${component[vagrant]}/vagrant_${component[vagrant]}_x86_64.rpm"
     _managePackages "install" "vagrant_${component[vagrant]}_x86_64.rpm"
@@ -608,18 +671,19 @@ else
 fi 
 
 # Setup Metron
-if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Installing metron into $(_getDir "metron")"; fi
+_feedback VERBOSE "Installing metron into $(_getDir "metron")"
 # TODO: Allow a way to pull down and setup a specific, older version by checking out the ref
 # TODO: Fetching specific refs may cause an issue with the PR merge feature
 cd "$(_getDir "metron")"
 _downloadit "${metronRepo}" "git"
+git checkout "${component[metron]}"
 if [[ "${mergebranch}" == "1" ]]; then
-    if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Merging the branches ${branches[@]} into $(_getDir "metron")"; fi
+    _feedback VERBOSE "Merging the branches ${branches[@]} into $(_getDir "metron")"
     for branch in "${branches[@]}"; do
         git merge "${branch}" || _feedback ABORT "Unable to merge the ${branch} branch"
     done
 elif [[ "${mergepr}" == "1" ]]; then
-    if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Merging the pr ${prSpecified} into $(_getDir "metron")"; fi
+    _feedback VERBOSE "Merging the pr ${prSpecified} into $(_getDir "metron")"
     isgit="$(git rev-parse --is-inside-work-tree || echo false)"
     curBranch="$(git branch | grep \* | awk '{print $2}')"
     theOrigin="$(git remote -v | grep -m 1 origin | awk '{print $2}')"
@@ -630,6 +694,20 @@ elif [[ "${mergepr}" == "1" ]]; then
         _feedback "ABORT" "Something went wrong when trying to merge pr ${prSpecified} into $(_getDir "metron")"
     fi
 fi
+if [[ "${buildthedocs}" == "1" && $(grep "^metron_version: " "$(_getDir "metron")/metron-deployment/inventory/${deployChoice}/group_vars/all" | awk '{print $NF}') != "0.3.0" ]]; then
+    _feedback VERBOSE "Building the related Metron docs"
+    cd "$(_getDir "metron")/site-book"
+    bin/generate-md.sh || _feedback ERROR "Issue running generate-md.sh"
+    /usr/local/bin/mvn site:site || _feedback ERROR "Issue building the Metron docs"
+elif [[ "${buildthedocs}" == "1" && $(grep "^metron_version: " "$(_getDir "metron")/metron-deployment/inventory/${deployChoice}/group_vars/all" | awk '{print $NF}') == "0.3.0" ]]; then
+    _feedback ERROR "Unable to build the docs on Metron 0.3.0 because that function didn't exist yet, please refer to the README.md files individually"
+elif [[ "${buildthedocs}" == "0" ]]; then
+    _feedback VERBOSE "Skipping documentation build, as it was not requested"
+else
+    _feedback ABORT "Unknown error during document building logic"
+fi
+_feedback VERBOSE "Building Metron"
+cd "$(_getDir "metron")"
 /usr/local/bin/mvn clean package -DskipTests || _feedback ABORT "Issue building Metron"
     
 if [[ "Python ${component[python]}" == $(python --version 2>&1) && -x $(which easy_install-${component[python]:0:3}) && "ansible ${component[ansible]}" == $(ansible --version | head -1) && "${component[virtualbox]%%_*}" == "$(vboxmanage --version | cut -f1 -d'r')" && "Vagrant ${component[vagrant]}" == $(vagrant --version) ]]; then
@@ -640,7 +718,7 @@ if [[ "Python ${component[python]}" == $(python --version 2>&1) && -x $(which ea
             sed -i '/ansible.playbook/a     ansible.verbose = "vvvv"' "$(_getDir "metron")/metron-deployment/vagrant/${deployChoice}/Vagrantfile" && modifiedvagrant=1
         fi
         if [[ "${usrCurrent}" == "${usrSpecified}" ]]; then
-            if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Starting up metron's \"${deployChoice}\""; fi
+            _feedback VERBOSE "Starting up metron's \"${deployChoice}\""
             cd "$(_getDir "metron")/metron-deployment/vagrant/${deployChoice}"
             # Fixed as of METRON-635, awaiting merge via PR #411
             # TODO: This solution is not super clean for the situation where the PR gets merged but a new release has not come out, but it should still work.  Probably worth a clean up at that point.
@@ -665,7 +743,7 @@ if [[ "Python ${component[python]}" == $(python --version 2>&1) && -x $(which ea
                 ./run.sh || _feedback ERROR "Unable to run ./run.sh"
             fi
         elif sudo -v -u "${usrSpecified}" > /dev/null 2>&1 ; then
-            if [[ "${verbose}" == "1" ]]; then _feedback VERBOSE "Starting up metron's \"${deployChoice}\" as \"${usrSpecified}\""; fi
+            _feedback VERBOSE "Starting up metron's \"${deployChoice}\" as \"${usrSpecified}\""
             cd "$(_getDir "metron")/metron-deployment/vagrant/${deployChoice}"
             # Fixed as of METRON-635
             if [[ $(grep "^metron_version: " "$(_getDir "metron")/metron-deployment/inventory/${deployChoice}/group_vars/all" | awk '{print $NF}') =~ "${versions[workaround]}" ]]; then
