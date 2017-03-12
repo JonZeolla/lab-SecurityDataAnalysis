@@ -22,6 +22,7 @@ Event Details coming soon
 ## How to use this repo
 ### Setup
 * Run `setup/setup.sh` to setup the lab.
+
 ### Example Guides to follow
 * [Metron Reference Application](https://goo.gl/q09Hgs)
 * [Stellar REPL](https://goo.gl/ublkds)
