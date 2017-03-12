@@ -4,7 +4,7 @@
 
 # =========================
 # Author:          Jon Zeolla (JZeolla, JonZeolla)
-# Last update:     2017-02-13
+# Last update:     2017-03-12
 # File Type:       Bash Script
 # Version:         1.0-ALPHA
 # Repository:      https://github.com/jonzeolla/lab-securitydataanalysis
@@ -72,12 +72,12 @@ component[virtualbox]="5.0.28_111378"
 component[python]="2.7.11"
 component[maven]="3.3.9"
 component[ez_setup]="bootstrap"
-component[metron]="master"
+component[metron]="0.3.0"
 versions[supported]="0.3.0","0.3.1"
 versions[workaround]="0.3.0","0.3.1"
 
 ## Populate additional, more dynamic variables
-if command -v python > /dev/null 2>&1 && [[ "Python ${component[python]}" == "$(python --version 2>&1)" ]]; then prereqs[python]="Expected"; else prereqs[python]="Unknown"; fi
+if command -v /usr/local/bin/python > /dev/null 2>&1 && [[ "Python ${component[python]}" == "$(python --version 2>&1)" ]]; then prereqs[python]="Expected"; else prereqs[python]="Unknown"; fi
 if command -v easy_install-${component[python]:0:3} > /dev/null 2>&1 ; then prereqs[ez_setup]="Expected"; else prereqs[ez_setup]="Unknown"; fi
 if command -v ansible > /dev/null 2>&1 && [[ "ansible ${component[ansible]}" == "$(ansible --version | head -1)" ]]; then prereqs[ansible]="Expected"; else prereqs[ansible]="Unknown"; fi
 if command -v mvn > /dev/null 2>&1 && [[ "Apache Maven ${component[maven]}" == "$(mvn --version | head -1 | awk '{print $1,$2,$3}')" ]]; then prereqs[maven]="Expected"; else prereqs[maven]="Unknown"; fi
@@ -428,6 +428,9 @@ case "${OSTYPE}" in
             OS[distro]="$(awk -F\  '{print $1}' /etc/centos-release)"
             OS[version]="$(awk -F\  '{print $(NF-1)}' /etc/centos-release)"
             if [[ "${OS[distro]}" == "CentOS" && ("${OS[version]}" == "6.8") ]]; then
+	        if [[ "${component[metron]}" == "master" ]]; then
+                    _feedback VERBOSE "As of METRON-671 CentOS 6 is no longer supported due to its dependency on docker.  We can't be sure that code will be in use here until later in the script, so I will continue..."
+                fi
                 OS[supported]="true"
             else
                 OS[supported]="false"
@@ -611,7 +614,7 @@ else
     _downloadit "https://bootstrap.pypa.io/ez_setup.py"
     sudo /usr/local/bin/python ez_setup.py || _feedback ERROR "Unable to setup ez_python.py"
     sudo "/usr/local/bin/easy_install-${component[python]:0:3}" pip || _feedback ERROR "Unable to setup pip"
-    sudo /usr/local/bin/pip -q install virtualenv paramiko PyYAML Jinja2 httplib2 six setuptools || _feedback ERROR "Unable to install tools with pip"
+    sudo pip -q install virtualenv paramiko PyYAML Jinja2 httplib2 six setuptools || _feedback ERROR "Unable to install tools with pip"
 fi
 
 
@@ -620,7 +623,7 @@ if [[ "${prereqs[ansible]}" == "Expected" ]]; then
     _feedback INFO "Ansible ${component[ansible]} already appears to be active, skipping..."
 else
     _feedback VERBOSE "Installing ansible using pip"
-    sudo /usr/local/bin/pip -q install "ansible==${component[ansible]}" || _feedback ERROR "Unable to install ansible"
+    sudo pip -q install "ansible==${component[ansible]}" || _feedback ERROR "Unable to install ansible"
 fi
 
 # Setup maven
@@ -670,6 +673,7 @@ _feedback VERBOSE "Installing metron into $(_getDir "metron")"
 # TODO: Fetching specific refs may cause an issue with the PR merge feature
 cd "$(_getDir "metron")"
 _downloadit "${metronRepo}" "git"
+git checkout "Metron_${component[metron]}"
 if [[ "${mergebranch}" == "1" ]]; then
     _feedback VERBOSE "Merging the branches ${branches[@]} into $(_getDir "metron")"
     for branch in "${branches[@]}"; do
@@ -684,8 +688,12 @@ elif [[ "${mergepr}" == "1" ]]; then
         git fetch origin "pull/${prSpecified}/head:pr-${prSpecified}" || _feedback ERROR "Issue fetching the ${prSpecified} PR"
         git merge "pr-${prSpecified}" || _feedback ERROR "Issue merging the ${prSpecified} PR"
     else
-        _feedback "ABORT" "Something went wrong when trying to merge pr ${prSpecified} into $(_getDir "metron")"
+        _feedback ABORT "Something went wrong when trying to merge pr ${prSpecified} into $(_getDir "metron")"
     fi
+fi
+# Check for CentOS 6.8 and METRON-671
+if [[ $(git log --oneline | grep 'METRON-671' > /dev/null) && "${OS[distro]}" == "CentOS" && "${OS[version]}" == "6.8" ]]; then
+    _feedback ABORT "CentOS 6.8 is no longer compatible as of METRON-671"
 fi
 if [[ "${buildthedocs}" == "1" && $(grep "^metron_version: " "$(_getDir "metron")/metron-deployment/inventory/${deployChoice}/group_vars/all" | awk '{print $NF}') != "0.3.0" ]]; then
     _feedback VERBOSE "Building the related Metron docs"
